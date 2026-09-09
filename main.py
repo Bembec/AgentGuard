@@ -10,11 +10,33 @@ permissions = {
     "send_email": "BLOCK",
 }
 
+risk_weights = {
+    "read_file": 0,
+    "search_logs": 0,
+    "delete_file": 20,
+    "run_program": 25,
+    "send_email": 40,
+}
+
 max_blocked_attempts = 3
 blocked_attempts = 0
+risk_score = 0
+max_risk_score = 100
 agent_status = "ACTIVE"
 
 log_path = Path(__file__).parent / "security.log"
+
+def get_risk_level(score):
+    """Convert the numerical risk score into a risk level."""
+
+    if score >= 100:
+        return "CRITICAL"
+    elif score >= 60:
+        return "HIGH"
+    elif score >= 20:
+        return "MEDIUM"
+    else:
+        return "LOW"
 
 
 def write_log(action, decision):
@@ -29,6 +51,8 @@ def write_log(action, decision):
             f"{timestamp} | "
             f"Action: {action} | "
             f"Decision: {decision} | "
+            f"Risk score: {risk_score} | "
+            f"Risk level: {get_risk_level(risk_score)} | "
             f"Agent status: {agent_status} | "
             f"Blocked attempts: {blocked_attempts}\n"
         )
@@ -49,6 +73,7 @@ while True:
         if action == "reset":
             agent_status = "ACTIVE"
             blocked_attempts = 0
+            risk_score = 0
 
             print("Agent has been manually reset.")
             write_log(action, "RESET")
@@ -59,8 +84,15 @@ while True:
         continue
 
     decision = permissions.get(action, "BLOCK")
+    action_risk = risk_weights.get(action, 50)
+
+    risk_score += action_risk
+    risk_level = get_risk_level(risk_score)
 
     print("Decision:", decision)
+    print("Risk added:", action_risk)
+    print("Total risk score:", risk_score)
+    print("Risk level:", risk_level)
 
     if decision == "BLOCK":
         blocked_attempts += 1
@@ -71,7 +103,10 @@ while True:
             max_blocked_attempts,
         )
 
-    if blocked_attempts >= max_blocked_attempts:
+    if (
+        blocked_attempts >= max_blocked_attempts
+        or risk_score >= max_risk_score
+    ):
         agent_status = "SUSPENDED"
         print(
             "SECURITY ALERT: Agent has been SUSPENDED."

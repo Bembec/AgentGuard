@@ -41,6 +41,44 @@ Version 2 introduces an emergency suspension system for repeatedly blocked actio
 * Records timestamps, decisions, agent status and blocked-attempt counts
 * Supports a `quit` command for safely closing the session
 
+## Version 3
+
+Version 3 introduces weighted risk scoring. AgentGuard now evaluates the accumulated danger of an agent’s behaviour instead of relying only on the number of blocked actions.
+
+### Features
+
+* Assigns different risk points to different actions
+* Gives unknown actions a high default risk value
+* Accumulates risk throughout the session
+* Classifies behaviour as `LOW`, `MEDIUM`, `HIGH` or `CRITICAL`
+* Records risk scores and levels in the audit log
+* Suspends the agent when its score reaches the critical threshold
+* Retains the three-block emergency suspension from Version 2
+* Resets both the risk score and blocked-attempt counter after manual reset
+
+### Current Risk Weights
+
+| Action         | Decision | Risk points |
+| -------------- | -------- | ----------: |
+| `read_file`    | ALLOW    |           0 |
+| `search_logs`  | ALLOW    |           0 |
+| `delete_file`  | ASK      |          20 |
+| `run_program`  | ASK      |          25 |
+| `send_email`   | BLOCK    |          40 |
+| Unknown action | BLOCK    |          50 |
+
+### Risk Levels
+
+|       Score | Risk level |
+| ----------: | ---------- |
+|        0–19 | LOW        |
+|       20–59 | MEDIUM     |
+|       60–99 | HIGH       |
+| 100 or more | CRITICAL   |
+
+AgentGuard suspends the agent when either the risk score reaches `100` or three blocked actions occur.
+
+
 ## Example Security Flow
 
 ```text
@@ -102,13 +140,12 @@ The log file is excluded from Git because real audit logs may contain sensitive 
 
 Future versions may include:
 
-* Weighted `agent_risk_score`
-* Different risk levels for different actions
+* Context-aware and dynamically adjusted risk scores
 * Human approval workflow for `ASK` decisions
 * Authentication for manual reset
 * Persistent agent suspension
 * Database-backed audit logs
-* Agent action traces
+* Complete agent action traces
 * Policy management dashboard
 * Real-time security alerts
 * Sandboxed tool execution
