@@ -39,7 +39,24 @@ def get_risk_level(score):
         return "LOW"
 
 
-def write_log(action, decision):
+def request_human_approval(action):
+    """Ask a human to approve or deny a sensitive action."""
+
+    while True:
+        response = input(
+            f"Approve '{action}'? Enter yes or no: "
+        ).strip().lower()
+
+        if response in ("yes", "y"):
+            return "APPROVED"
+
+        if response in ("no", "n"):
+            return "DENIED"
+
+        print("Invalid response. Please enter yes or no.")
+
+
+def write_log(action, decision, approval="NOT_REQUIRED"):
     """Record every action and security decision."""
 
     timestamp = datetime.now().astimezone().isoformat(
@@ -51,6 +68,7 @@ def write_log(action, decision):
             f"{timestamp} | "
             f"Action: {action} | "
             f"Decision: {decision} | "
+            f"Approval: {approval} | "
             f"Risk score: {risk_score} | "
             f"Risk level: {get_risk_level(risk_score)} | "
             f"Agent status: {agent_status} | "
@@ -89,7 +107,14 @@ while True:
     risk_score += action_risk
     risk_level = get_risk_level(risk_score)
 
-    print("Decision:", decision)
+    print("Policy decision:", decision)
+
+    approval_result = "NOT_REQUIRED"
+
+    if decision == "ASK":
+        approval_result = request_human_approval(action)
+        print("Final decision:", approval_result)
+
     print("Risk added:", action_risk)
     print("Total risk score:", risk_score)
     print("Risk level:", risk_level)
@@ -112,4 +137,4 @@ while True:
             "SECURITY ALERT: Agent has been SUSPENDED."
         )
 
-    write_log(action, decision)
+    write_log(action, decision, approval_result)

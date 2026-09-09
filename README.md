@@ -78,6 +78,24 @@ Version 3 introduces weighted risk scoring. AgentGuard now evaluates the accumul
 
 AgentGuard suspends the agent when either the risk score reaches `100` or three blocked actions occur.
 
+## Version 4
+
+Version 4 introduces a human-in-the-loop approval workflow for sensitive actions classified as `ASK`.
+
+### Features
+
+* Pauses sensitive actions for human review
+* Accepts `yes` or `y` as approval
+* Accepts `no` or `n` as denial
+* Rejects invalid approval responses and asks again
+* Separately records the policy decision and human decision
+* Uses `NOT_REQUIRED` for actions that do not need approval
+* Continues calculating risk regardless of the approval result
+* Records approval outcomes in the security audit log
+
+AgentGuard currently simulates whether the requested action may proceed. It does not yet perform the actual file or program operation.
+
+
 
 ## Example Security Flow
 
@@ -141,7 +159,7 @@ The log file is excluded from Git because real audit logs may contain sensitive 
 Future versions may include:
 
 * Context-aware and dynamically adjusted risk scores
-* Human approval workflow for `ASK` decisions
+* Authenticated approvers and approval history
 * Authentication for manual reset
 * Persistent agent suspension
 * Database-backed audit logs
