@@ -113,6 +113,38 @@ Version 5 protects the reset operation with administrator authentication and sav
 * Saves authenticated reset results immediately
 * Falls back to a safe default state if the state file is missing or invalid
 
+
+## Version 6 — SQLite Audit Database
+
+AgentGuard V6 introduces persistent database-backed security auditing.
+
+### Features
+
+* Automatically creates an SQLite database
+* Stores every security decision as an audit event
+* Records actions, decisions, approvals, risk scores, and agent status
+* Keeps the existing text log as a backup
+* Displays the five most recent events with `view_audit`
+* Displays database statistics with `audit_summary`
+* Preserves the agent’s security state between sessions
+
+### Audit Commands
+
+Use the following commands while AgentGuard is running:
+
+* `view_audit` — displays the five most recent audit events
+* `audit_summary` — displays total events, allowed actions, approval requests, blocked actions, refused actions, and the highest recorded risk score
+
+### Main Project Files
+
+* `main.py` — AgentGuard policy and security monitoring system
+* `database.py` — SQLite database creation and audit queries
+* `README.md` — project documentation
+* `.gitignore` — prevents private runtime files from being uploaded
+
+Runtime files such as `agentguard.db`, `agent_state.json`, and `security.log` are excluded from GitHub.
+
+
 ### Configuring the Administrator PIN
 
 PowerShell:

@@ -3,6 +3,12 @@ import os
 from datetime import datetime
 from getpass import getpass
 from pathlib import Path
+from database import (
+    get_audit_summary,
+    get_recent_audit_events,
+    initialize_database,
+    save_audit_event,
+)
 
 
 permissions = {
@@ -11,6 +17,8 @@ permissions = {
     "delete_file": "ASK",
     "run_program": "ASK",
     "send_email": "BLOCK",
+    "view_audit": "ALLOW",
+    "audit_summary": "ALLOW",
 }
 
 risk_weights = {
@@ -19,6 +27,8 @@ risk_weights = {
     "delete_file": 20,
     "run_program": 25,
     "send_email": 40,
+    "view_audit": 0,
+    "audit_summary": 0,
 }
 
 max_blocked_attempts = 3
@@ -125,6 +135,7 @@ def write_log(
     action,
     decision,
     approval="NOT_REQUIRED",
+    risk_added=0,
 ):
     """Record every action and security decision."""
 
@@ -132,6 +143,7 @@ def write_log(
         timespec="seconds"
     )
 
+    # Save the event in the text log
     with log_path.open("a", encoding="utf-8") as log:
         log.write(
             f"{timestamp} | "
@@ -144,6 +156,71 @@ def write_log(
             f"Blocked attempts: {blocked_attempts}\n"
         )
 
+    # Save the same event in the SQLite database
+    save_audit_event(
+        timestamp=timestamp,
+        action=action,
+        decision=decision,
+        approval=approval,
+        risk_added=risk_added,
+        risk_score=risk_score,
+        risk_level=get_risk_level(risk_score),
+        agent_status=agent_status,
+        blocked_attempts=blocked_attempts,
+    )
+
+
+def display_recent_audit_events():
+    """Display the five most recent audit events."""
+
+    events = get_recent_audit_events(limit=5)
+
+    print("\nAgentGuard — Recent Audit Events")
+
+    if not events:
+        print("No audit events found.")
+        return
+
+    for event in events:
+        (
+            timestamp,
+            action,
+            decision,
+            approval,
+            event_risk_score,
+            risk_level,
+            event_agent_status,
+        ) = event
+
+        print(
+            f"{timestamp} | "
+            f"Action: {action} | "
+            f"Decision: {decision} | "
+            f"Approval: {approval} | "
+            f"Risk: {event_risk_score} "
+            f"({risk_level}) | "
+            f"Status: {event_agent_status}"
+        )
+
+
+def display_audit_summary():
+    """Display summary statistics from the audit database."""
+
+    summary = get_audit_summary()
+
+    print("\nAgentGuard — Audit Summary")
+    print("Total events:", summary["total_events"])
+    print("Allowed actions:", summary["allowed"])
+    print("Approval requests:", summary["asked"])
+    print("Blocked actions:", summary["blocked"])
+    print("Refused actions:", summary["refused"])
+    print(
+        "Highest risk score:",
+        summary["highest_risk_score"],
+    )
+
+
+initialize_database()
 
 saved_state = load_state()
 
@@ -258,8 +335,16 @@ while True:
         )
 
     save_state()
+
     write_log(
         action,
         decision,
         approval_result,
+        action_risk,
     )
+
+    if action == "view_audit":
+        display_recent_audit_events()
+
+    if action == "audit_summary":
+        display_audit_summary()
