@@ -145,6 +145,45 @@ Use the following commands while AgentGuard is running:
 Runtime files such as `agentguard.db`, `agent_state.json`, and `security.log` are excluded from GitHub.
 
 
+## Version 7 — Multi-Agent Security Monitoring
+
+AgentGuard V7 can monitor multiple AI agents while maintaining an independent security state for each one.
+
+### Features
+
+* Registers multiple AI agents by name
+* Maintains separate risk scores for every agent
+* Maintains separate blocked-attempt counts
+* Suspends dangerous agents individually
+* Keeps safe agents active when another agent is suspended
+* Stores each agent’s identity in the SQLite audit database
+* Filters audit history and summaries by the active agent
+* Converts the previous V6 state into a `legacy_agent` automatically
+* Preserves all agent states between program sessions
+
+### Agent Management Commands
+
+* `list_agents` — displays all registered agents and their security states
+* `switch_agent` — switches to an existing agent or registers a new agent
+* `view_audit` — displays recent events for the active agent
+* `audit_summary` — displays security statistics for the active agent
+* `reset` — resets a suspended agent after administrator verification
+* `quit` — saves all agent states and closes AgentGuard
+
+### Multi-Agent Isolation
+
+Each registered agent has its own:
+
+* Status
+* Risk score
+* Risk level
+* Blocked-attempt count
+* Audit history
+* Audit summary
+
+A suspended agent cannot affect the security state of other registered agents.
+
+
 ### Configuring the Administrator PIN
 
 PowerShell:

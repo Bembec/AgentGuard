@@ -8,13 +8,14 @@ database_path = (
 
 
 def initialize_database():
-    """Create the AgentGuard audit database and table."""
+    """Create or upgrade the AgentGuard audit database."""
 
     with sqlite3.connect(database_path) as connection:
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS audit_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_name TEXT NOT NULL DEFAULT 'legacy_agent',
                 timestamp TEXT NOT NULL,
                 action TEXT NOT NULL,
                 decision TEXT NOT NULL,
@@ -28,8 +29,26 @@ def initialize_database():
             """
         )
 
+        columns = connection.execute(
+            "PRAGMA table_info(audit_events)"
+        ).fetchall()
+
+        column_names = [
+            column[1] for column in columns
+        ]
+
+        if "agent_name" not in column_names:
+            connection.execute(
+                """
+                ALTER TABLE audit_events
+                ADD COLUMN agent_name TEXT
+                NOT NULL DEFAULT 'legacy_agent'
+                """
+            )
+
 
 def save_audit_event(
+    agent_name,
     timestamp,
     action,
     decision,
@@ -46,6 +65,7 @@ def save_audit_event(
         connection.execute(
             """
             INSERT INTO audit_events (
+                agent_name,
                 timestamp,
                 action,
                 decision,
@@ -56,9 +76,10 @@ def save_audit_event(
                 agent_status,
                 blocked_attempts
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                agent_name,
                 timestamp,
                 action,
                 decision,
@@ -71,14 +92,14 @@ def save_audit_event(
             ),
         )
 
-
-def get_recent_audit_events(limit=5):
-    """Return the most recent security events."""
+def get_recent_audit_events(agent_name, limit=5):
+    """Return the most recent events for one agent."""
 
     with sqlite3.connect(database_path) as connection:
         cursor = connection.execute(
             """
             SELECT
+                agent_name,
                 timestamp,
                 action,
                 decision,
@@ -87,30 +108,45 @@ def get_recent_audit_events(limit=5):
                 risk_level,
                 agent_status
             FROM audit_events
+            WHERE agent_name = ?
             ORDER BY id DESC
             LIMIT ?
             """,
-            (limit,),
+            (agent_name, limit),
         )
 
         return cursor.fetchall()
 
 
-def get_audit_summary():
-    """Return summary statistics for all audit events."""
+def get_audit_summary(agent_name):
+    """Return audit statistics for one agent."""
 
     with sqlite3.connect(database_path) as connection:
         summary = connection.execute(
             """
             SELECT
                 COUNT(*),
-                SUM(CASE WHEN decision = 'ALLOW' THEN 1 ELSE 0 END),
-                SUM(CASE WHEN decision = 'ASK' THEN 1 ELSE 0 END),
-                SUM(CASE WHEN decision = 'BLOCK' THEN 1 ELSE 0 END),
-                SUM(CASE WHEN decision = 'REFUSED' THEN 1 ELSE 0 END),
+                SUM(
+                    CASE WHEN decision = 'ALLOW'
+                    THEN 1 ELSE 0 END
+                ),
+                SUM(
+                    CASE WHEN decision = 'ASK'
+                    THEN 1 ELSE 0 END
+                ),
+                SUM(
+                    CASE WHEN decision = 'BLOCK'
+                    THEN 1 ELSE 0 END
+                ),
+                SUM(
+                    CASE WHEN decision = 'REFUSED'
+                    THEN 1 ELSE 0 END
+                ),
                 COALESCE(MAX(risk_score), 0)
             FROM audit_events
-            """
+            WHERE agent_name = ?
+            """,
+            (agent_name,),
         ).fetchone()
 
     return {
