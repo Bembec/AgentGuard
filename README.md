@@ -96,6 +96,43 @@ Version 4 introduces a human-in-the-loop approval workflow for sensitive actions
 AgentGuard currently simulates whether the requested action may proceed. It does not yet perform the actual file or program operation.
 
 
+## Version 5
+
+Version 5 protects the reset operation with administrator authentication and saves AgentGuard’s security state between program sessions.
+
+### Features
+
+* Reads the administrator PIN from an environment variable
+* Keeps the PIN outside the source code and GitHub repository
+* Hides PIN input using Python’s `getpass`
+* Rejects unauthorized reset attempts
+* Prevents unnecessary reset attempts while the agent is active
+* Saves agent status, risk score and blocked-attempt count in JSON
+* Restores the saved security state when AgentGuard starts
+* Preserves suspension after the program is closed or restarted
+* Saves authenticated reset results immediately
+* Falls back to a safe default state if the state file is missing or invalid
+
+### Configuring the Administrator PIN
+
+PowerShell:
+
+```powershell
+$env:AGENTGUARD_ADMIN_PIN = "choose-a-private-pin"
+python main.py
+```
+
+The environment variable is temporary and applies only to the current terminal session.
+
+### Persistent State
+
+AgentGuard stores runtime security state in:
+
+```text
+agent_state.json
+```
+
+The file is excluded from Git because it contains local runtime information.
 
 ## Example Security Flow
 
@@ -160,8 +197,6 @@ Future versions may include:
 
 * Context-aware and dynamically adjusted risk scores
 * Authenticated approvers and approval history
-* Authentication for manual reset
-* Persistent agent suspension
 * Database-backed audit logs
 * Complete agent action traces
 * Policy management dashboard
