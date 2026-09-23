@@ -1,244 +1,124 @@
-# AgentGuard
+﻿# AgentGuard
 
-AgentGuard is a Python-based AI agent permission and security monitor. It sits between an AI agent and the actions it wants to perform, checks each action against a security policy, and records the resulting decision.
+AgentGuard is an AI-agent permission and security control plane written in Python.
 
-The long-term goal is to combine AI-agent observability, permission control, audit logging, risk scoring and human approval in one platform.
+It evaluates actions requested by multiple agents, applies `ALLOW`, `ASK`, or `BLOCK` policies, tracks risk independently for every agent, requests human approval for sensitive actions, suspends unsafe agents, and stores audit evidence.
 
-## Permission Decisions
+>>**Core security principle:**Agent identity is not the same as agent permission.
+> An agent must eventually prove its identity before AgentGuard evaluates what that identity is allowed to do.
 
-AgentGuard currently supports three policy decisions:
+## Current Version
 
-* `ALLOW` — the agent can perform the action.
-* `ASK` — human approval is required before the action proceeds.
-* `BLOCK` — the action is forbidden.
+**Version 8 â€” FastAPI Multi-Agent Control Plane**
 
-Actions not found in the permission policy are blocked by default.
+AgentGuard can now be used through:
 
-## Version 1
+- An interactive Python terminal
+- A FastAPI REST API
+- Interactive OpenAPI documentation
+- Per-agent audit and summary endpoints
 
-Version 1 introduced the basic permission-monitoring system.
+## Core Features
 
-### Features
+- Multi-agent registration and independent state
+- `ALLOW`, `ASK`, and `BLOCK` policy decisions
+- Weighted risk scoring
+- `LOW`, `MEDIUM`, `HIGH`, and `CRITICAL` risk levels
+- Human approval and denial workflows
+- Automatic agent suspension
+- Refusal of actions from suspended agents
+- Administrator-controlled reset
+- JSON state persistence
+- SQLite audit history
+- Text security logging
+- FastAPI control-plane endpoints
+- Unknown-agent rejection
+- Input validation
+- Environment-variable administrator PIN
 
-* Accepts an action from the terminal
-* Checks the action against a permission dictionary
-* Returns `ALLOW`, `ASK` or `BLOCK`
-* Blocks unknown actions by default
-* Records actions and decisions in `security.log`
+## Project Structure
 
-## Version 2
-
-Version 2 introduces an emergency suspension system for repeatedly blocked actions.
-
-### Features
-
-* Keeps AgentGuard running for multiple actions
-* Counts blocked actions during the session
-* Suspends the agent after three blocked attempts
-* Refuses every normal action while the agent is suspended
-* Supports manual reset
-* Resets the blocked-attempt counter after manual reset
-* Records timestamps, decisions, agent status and blocked-attempt counts
-* Supports a `quit` command for safely closing the session
-
-## Version 3
-
-Version 3 introduces weighted risk scoring. AgentGuard now evaluates the accumulated danger of an agent’s behaviour instead of relying only on the number of blocked actions.
-
-### Features
-
-* Assigns different risk points to different actions
-* Gives unknown actions a high default risk value
-* Accumulates risk throughout the session
-* Classifies behaviour as `LOW`, `MEDIUM`, `HIGH` or `CRITICAL`
-* Records risk scores and levels in the audit log
-* Suspends the agent when its score reaches the critical threshold
-* Retains the three-block emergency suspension from Version 2
-* Resets both the risk score and blocked-attempt counter after manual reset
-
-### Current Risk Weights
-
-| Action         | Decision | Risk points |
-| -------------- | -------- | ----------: |
-| `read_file`    | ALLOW    |           0 |
-| `search_logs`  | ALLOW    |           0 |
-| `delete_file`  | ASK      |          20 |
-| `run_program`  | ASK      |          25 |
-| `send_email`   | BLOCK    |          40 |
-| Unknown action | BLOCK    |          50 |
-
-### Risk Levels
-
-|       Score | Risk level |
-| ----------: | ---------- |
-|        0–19 | LOW        |
-|       20–59 | MEDIUM     |
-|       60–99 | HIGH       |
-| 100 or more | CRITICAL   |
-
-AgentGuard suspends the agent when either the risk score reaches `100` or three blocked actions occur.
-
-## Version 4
-
-Version 4 introduces a human-in-the-loop approval workflow for sensitive actions classified as `ASK`.
-
-### Features
-
-* Pauses sensitive actions for human review
-* Accepts `yes` or `y` as approval
-* Accepts `no` or `n` as denial
-* Rejects invalid approval responses and asks again
-* Separately records the policy decision and human decision
-* Uses `NOT_REQUIRED` for actions that do not need approval
-* Continues calculating risk regardless of the approval result
-* Records approval outcomes in the security audit log
-
-AgentGuard currently simulates whether the requested action may proceed. It does not yet perform the actual file or program operation.
-
-
-## Version 5
-
-Version 5 protects the reset operation with administrator authentication and saves AgentGuard’s security state between program sessions.
-
-### Features
-
-* Reads the administrator PIN from an environment variable
-* Keeps the PIN outside the source code and GitHub repository
-* Hides PIN input using Python’s `getpass`
-* Rejects unauthorized reset attempts
-* Prevents unnecessary reset attempts while the agent is active
-* Saves agent status, risk score and blocked-attempt count in JSON
-* Restores the saved security state when AgentGuard starts
-* Preserves suspension after the program is closed or restarted
-* Saves authenticated reset results immediately
-* Falls back to a safe default state if the state file is missing or invalid
-
-
-## Version 6 — SQLite Audit Database
-
-AgentGuard V6 introduces persistent database-backed security auditing.
-
-### Features
-
-* Automatically creates an SQLite database
-* Stores every security decision as an audit event
-* Records actions, decisions, approvals, risk scores, and agent status
-* Keeps the existing text log as a backup
-* Displays the five most recent events with `view_audit`
-* Displays database statistics with `audit_summary`
-* Preserves the agent’s security state between sessions
-
-### Audit Commands
-
-Use the following commands while AgentGuard is running:
-
-* `view_audit` — displays the five most recent audit events
-* `audit_summary` — displays total events, allowed actions, approval requests, blocked actions, refused actions, and the highest recorded risk score
-
-### Main Project Files
-
-* `main.py` — AgentGuard policy and security monitoring system
-* `database.py` — SQLite database creation and audit queries
-* `README.md` — project documentation
-* `.gitignore` — prevents private runtime files from being uploaded
-
-Runtime files such as `agentguard.db`, `agent_state.json`, and `security.log` are excluded from GitHub.
-
-
-## Version 7 — Multi-Agent Security Monitoring
-
-AgentGuard V7 can monitor multiple AI agents while maintaining an independent security state for each one.
-
-### Features
-
-* Registers multiple AI agents by name
-* Maintains separate risk scores for every agent
-* Maintains separate blocked-attempt counts
-* Suspends dangerous agents individually
-* Keeps safe agents active when another agent is suspended
-* Stores each agent’s identity in the SQLite audit database
-* Filters audit history and summaries by the active agent
-* Converts the previous V6 state into a `legacy_agent` automatically
-* Preserves all agent states between program sessions
-
-### Agent Management Commands
-
-* `list_agents` — displays all registered agents and their security states
-* `switch_agent` — switches to an existing agent or registers a new agent
-* `view_audit` — displays recent events for the active agent
-* `audit_summary` — displays security statistics for the active agent
-* `reset` — resets a suspended agent after administrator verification
-* `quit` — saves all agent states and closes AgentGuard
-
-### Multi-Agent Isolation
-
-Each registered agent has its own:
-
-* Status
-* Risk score
-* Risk level
-* Blocked-attempt count
-* Audit history
-* Audit summary
-
-A suspended agent cannot affect the security state of other registered agents.
-
-
-### Configuring the Administrator PIN
-
-PowerShell:
-
-```powershell
-$env:AGENTGUARD_ADMIN_PIN = "choose-a-private-pin"
-python main.py
+```text
+AgentGuard/
+â”œâ”€â”€ api.py
+â”œâ”€â”€ database.py
+â”œâ”€â”€ main.py
+â”œâ”€â”€ requirements.txt
+â”œâ”€â”€ README.md
+â””â”€â”€ .gitignore
 ```
 
-The environment variable is temporary and applies only to the current terminal session.
-
-### Persistent State
-
-AgentGuard stores runtime security state in:
+Runtime files are generated locally and excluded from Git:
 
 ```text
 agent_state.json
+agentguard.db
+security.log
+__pycache__/
 ```
 
-The file is excluded from Git because it contains local runtime information.
+## Permission Policy
 
-## Example Security Flow
+The current demonstration policy includes:
 
-```text
-Agent status: ACTIVE
-Action: send_email
-Decision: BLOCK
-Blocked attempts: 1 / 3
+| Action | Decision | Risk |
+|---|---|---:|
+| `read_file` | `ALLOW` | 0 |
+| `search_logs` | `ALLOW` | 0 |
+| `delete_file` | `ASK` | 20 |
+| `run_program` | `ASK` | 25 |
+| `send_email` | `BLOCK` | 40 |
+| Unknown action | `BLOCK` | Defined by the engine |
 
-Agent status: ACTIVE
-Action: send_email
-Decision: BLOCK
-Blocked attempts: 2 / 3
+Sensitive `ASK` actions require an explicit `APPROVED` or `DENIED` decision.
 
-Agent status: ACTIVE
-Action: send_email
-Decision: BLOCK
-Blocked attempts: 3 / 3
+Blocked actions increase both the agentâ€™s risk score and blocked-attempt count.
 
-SECURITY ALERT: Agent has been SUSPENDED.
+## Risk Levels
+
+| Score | Risk level |
+|---:|---|
+| 0â€“29 | `LOW` |
+| 30â€“59 | `MEDIUM` |
+| 60â€“99 | `HIGH` |
+| 100 or higher | `CRITICAL` |
+
+An agent is suspended when it reaches the configured risk threshold or maximum blocked-attempt count.
+
+Every registered agent has its own:
+
+- Status
+- Risk score
+- Risk level
+- Blocked-attempt count
+- Audit history
+
+## Installation
+
+Install the V8 dependencies:
+
+```powershell
+python -m pip install -r requirements.txt
 ```
 
-While suspended, even an ordinarily permitted action is refused until the agent is manually reset.
+## Terminal Mode
 
-## Running AgentGuard
+Run AgentGuard directly:
 
-AgentGuard currently uses only Python’s standard library, so no additional packages are required.
-
-Run:
-
-```bash
+```powershell
 python main.py
 ```
 
-Available terminal commands include:
+Terminal commands include:
+
+```text
+list_agents
+switch_agent
+reset
+quit
+```
+
+You can also enter supported actions such as:
 
 ```text
 read_file
@@ -246,40 +126,263 @@ search_logs
 delete_file
 run_program
 send_email
-reset
-quit
 ```
 
-## Security Log
+## FastAPI Mode
 
-AgentGuard writes security events to `security.log`.
+Set an administrator PIN for the current PowerShell session:
 
-Example:
+```powershell
+$env:AGENTGUARD_ADMIN_PIN = "2468"
+```
+
+Start the API:
+
+```powershell
+python -m uvicorn api:app --reload
+```
+
+Open the interactive documentation:
 
 ```text
-2026-09-10T00:08:39+03:00 | Action: send_email | Decision: BLOCK | Agent status: SUSPENDED | Blocked attempts: 3
+http://127.0.0.1:8000/docs
 ```
 
-The log file is excluded from Git because real audit logs may contain sensitive information.
+The API root is:
 
-## Roadmap
+```text
+http://127.0.0.1:8000
+```
 
-Future versions may include:
+Stop the server with `Ctrl + C`.
 
-* Context-aware and dynamically adjusted risk scores
-* Authenticated approvers and approval history
-* Database-backed audit logs
-* Complete agent action traces
-* Policy management dashboard
-* Real-time security alerts
-* Sandboxed tool execution
-* FastAPI backend
-* Web-based monitoring dashboard
-* AI explanations for security decisions
+Do not use the example PIN in a real deployment.
 
-## Inspiration
+## API Endpoints
 
-AgentGuard’s long-term direction is inspired by AI-agent observability platforms such as LangSmith and permission audit systems such as Cerbos, while focusing specifically on AI-agent security governance.
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/` | Application information |
+| `GET` | `/health` | API health and agent count |
+| `GET` | `/permissions` | Policy and risk configuration |
+| `GET` | `/agents` | List registered agents |
+| `POST` | `/agents` | Register an agent |
+| `GET` | `/agents/{agent_name}` | Get one agentâ€™s state |
+| `POST` | `/actions/evaluate` | Evaluate an agent action |
+| `GET` | `/agents/{agent_name}/audit` | Get recent audit events |
+| `GET` | `/agents/{agent_name}/summary` | Get audit statistics |
+| `POST` | `/agents/{agent_name}/reset` | Administratively reset an agent |
+
+## Example Action Evaluation
+
+Request:
+
+```json
+{
+  "agent_name": "research_agent",
+  "action": "read_file"
+}
+```
+
+Example response:
+
+```json
+{
+  "agent_name": "research_agent",
+  "action": "read_file",
+  "policy_decision": "ALLOW",
+  "approval": "NOT_REQUIRED",
+  "risk_added": 0,
+  "risk_score": 0,
+  "risk_level": "LOW",
+  "blocked_attempts": 0,
+  "agent_status": "ACTIVE",
+  "message": "Action allowed by policy."
+}
+```
+
+## Human Approval Example
+
+Approved request:
+
+```json
+{
+  "agent_name": "approval_test_agent",
+  "action": "delete_file",
+  "approval": "APPROVED"
+}
+```
+
+Denied request:
+
+```json
+{
+  "agent_name": "denied_test_agent",
+  "action": "delete_file",
+  "approval": "DENIED"
+}
+```
+
+If no approval is supplied for an `ASK` action, AgentGuard returns `PENDING`.
+
+## Automatic Suspension
+
+A blocked action such as `send_email` adds risk and increases the blocked-attempt count.
+
+Example progression:
+
+```text
+Attempt 1: Risk 40, blocked attempts 1, ACTIVE
+Attempt 2: Risk 80, blocked attempts 2, ACTIVE
+Attempt 3: Risk 120, blocked attempts 3, SUSPENDED
+```
+
+Once suspended, the agent cannot perform normally permitted actions until an authorized administrator resets it.
+
+## Administrator Reset
+
+The reset endpoint requires the `X-Admin-Pin` request header.
+
+In the interactive API documentation:
+
+1. Open `POST /agents/{agent_name}/reset`.
+2. Enter the agent name.
+3. Enter the configured PIN in `x-admin-pin`.
+4. Execute the request.
+
+A successful reset returns the agent to:
+
+```text
+Status: ACTIVE
+Risk score: 0
+Blocked attempts: 0
+```
+
+The reset is recorded in the audit trail.
+
+## Audit Records
+
+AgentGuard stores security events in SQLite and writes local text events to `security.log`.
+
+Audit information includes:
+
+- Agent name
+- Timestamp
+- Requested action
+- Policy decision
+- Approval result
+- Risk score
+- Risk level
+- Agent status
+
+Runtime logs and databases are excluded from Git because real security records may contain sensitive information.
+
+## Version History
+
+### Version 1 â€” Basic Permission Policy
+
+- Added `ALLOW`, `ASK`, and `BLOCK` decisions
+- Added terminal action evaluation
+
+### Version 2 â€” Block Tracking
+
+- Counted blocked attempts
+- Added automatic suspension
+
+### Version 3 â€” Risk Scoring
+
+- Added action risk weights
+- Added risk levels and thresholds
+
+### Version 4 â€” Human Approval
+
+- Added approval for sensitive actions
+- Added approved and denied outcomes
+
+### Version 5 â€” Administrative Reset
+
+- Added PIN-protected reset
+- Added persistent state and security logging
+
+### Version 6 â€” SQLite Audit History
+
+- Added database-backed security events
+- Added recent-event and summary queries
+
+### Version 7 â€” Multi-Agent Control
+
+- Added independent agent states
+- Added agent registration and switching
+- Preserved state independently for every agent
+
+### Version 8 â€” FastAPI Control Plane
+
+- Added REST API access
+- Added interactive API documentation
+- Added agent registration and state endpoints
+- Added remote policy evaluation
+- Added approval input
+- Added audit and summary endpoints
+- Added administrator reset endpoint
+- Verified allow, block, approval, denial, suspension, refusal, reset, and audit workflows
+
+## Current Security Limitation
+
+V8 identifies an agent using the `agent_name` supplied in the request.
+
+The API does not yet cryptographically authenticate that the caller truly owns that agent identity. Therefore, V8 is suitable as a local learning and development control plane, not as a production authorization system.
+
+## Planned Security Architecture
+
+The next security layer will enforce:
+
+```text
+Agent credential
+â†’ Identity authentication
+â†’ Scope boundary
+â†’ Permission decision
+â†’ Risk update
+â†’ Audit evidence
+```
+
+Planned improvements include:
+
+- Agent API keys or signed credentials
+- Hashed credential storage
+- Credential rotation and revocation
+- Agent-specific permission scopes
+- Resource and tool boundaries
+- Per-agent rate limits
+- Authenticated human approvers
+- Policy administration endpoints
+- Real-time security alerts
+- Web monitoring dashboard
+- Sandboxed tool execution
+- AgentGuard adapter for CanaryLab AI
+
+## Future Principle
+
+```text
+Agent identity â‰  agent permission
+```
+
+Authentication will answer:
+
+```text
+Who is making this request?
+```
+
+Authorization will separately answer:
+
+```text
+What is this authenticated agent permitted to do?
+```
+
+This separation is essential for building a secure multi-agent control plane.
+
+## Safety Notice
+
+AgentGuard is a defensive educational project. It currently evaluates and records simulated agent actions. It does not provide unrestricted command execution, filesystem access, browser access, or network access.
 
 ## Author
 
