@@ -1,54 +1,62 @@
 ﻿# AgentGuard
 
-AgentGuard is an AI-agent permission and security control plane written in Python.
+AgentGuard is a defensive AI-agent identity, permission, risk, and security control plane written in Python.
 
-It evaluates actions requested by multiple agents, applies `ALLOW`, `ASK`, or `BLOCK` policies, tracks risk independently for every agent, requests human approval for sensitive actions, suspends unsafe agents, and stores audit evidence.
+It authenticates agents before accepting requests, enforces agent-specific scope boundaries, evaluates actions using `ALLOW`, `ASK`, or `BLOCK` policies, tracks risk independently, suspends unsafe agents, and stores audit evidence.
 
->>**Core security principle:**Agent identity is not the same as agent permission.
-> An agent must eventually prove its identity before AgentGuard evaluates what that identity is allowed to do.
+> **Core security principle:** Agent identity is not the same as agent permission.
 
 ## Current Version
 
-**Version 8 â€” FastAPI Multi-Agent Control Plane**
+**Version 9 — Agent Identity and Scope Boundary Enforcement**
 
-AgentGuard can now be used through:
+AgentGuard now follows this security flow:
 
-- An interactive Python terminal
-- A FastAPI REST API
-- Interactive OpenAPI documentation
-- Per-agent audit and summary endpoints
+```text
+Agent credential
+→ Identity authentication
+→ Scope boundary enforcement
+→ Permission policy
+→ Risk update
+→ Audit evidence
+```
 
 ## Core Features
 
-- Multi-agent registration and independent state
-- `ALLOW`, `ASK`, and `BLOCK` policy decisions
-- Weighted risk scoring
-- `LOW`, `MEDIUM`, `HIGH`, and `CRITICAL` risk levels
-- Human approval and denial workflows
-- Automatic agent suspension
-- Refusal of actions from suspended agents
-- Administrator-controlled reset
-- JSON state persistence
-- SQLite audit history
-- Text security logging
-- FastAPI control-plane endpoints
-- Unknown-agent rejection
-- Input validation
-- Environment-variable administrator PIN
+* Multi-agent registration and independent state
+* Unique agent credentials
+* Salted PBKDF2 credential hashing
+* Constant-time credential comparison
+* Agent-specific action scopes
+* Credential rotation
+* Credential revocation
+* Identity-impersonation prevention
+* HTTP `401` authentication failures
+* HTTP `403` scope failures
+* `ALLOW`, `ASK`, `BLOCK`, and `REFUSED` decisions
+* Human approval and denial
+* Weighted risk scoring
+* Automatic suspension
+* Administrator-controlled reset
+* JSON state persistence
+* SQLite audit history
+* Authentication-event evidence
+* FastAPI REST endpoints
+* Interactive OpenAPI documentation
 
 ## Project Structure
 
 ```text
 AgentGuard/
-â”œâ”€â”€ api.py
-â”œâ”€â”€ database.py
-â”œâ”€â”€ main.py
-â”œâ”€â”€ requirements.txt
-â”œâ”€â”€ README.md
-â””â”€â”€ .gitignore
+├── api.py
+├── database.py
+├── main.py
+├── requirements.txt
+├── README.md
+└── .gitignore
 ```
 
-Runtime files are generated locally and excluded from Git:
+The following runtime files are generated locally and excluded from Git:
 
 ```text
 agent_state.json
@@ -57,53 +65,102 @@ security.log
 __pycache__/
 ```
 
+## Security Layers
+
+AgentGuard evaluates requests through three separate controls.
+
+### 1. Authentication
+
+Authentication answers:
+
+```text
+Who is making this request?
+```
+
+An agent supplies:
+
+```text
+X-Agent-Name
+X-Agent-Key
+```
+
+AgentGuard verifies the credential against its stored salted hash.
+
+### 2. Scope Authorization
+
+Authorization answers:
+
+```text
+Is this authenticated agent permitted to request this action?
+```
+
+A valid credential does not grant every permission. The requested action must appear in that agent's scopes.
+
+### 3. Security Policy
+
+Policy evaluation answers:
+
+```text
+What security decision applies to this permitted request?
+```
+
+Even when an agent is authenticated and has the correct scope, AgentGuard may still return `ASK` or `BLOCK`.
+
+Example:
+
+```text
+Identity authenticated
+→ send_email scope allowed
+→ security policy returns BLOCK
+→ risk score increases
+```
+
 ## Permission Policy
 
-The current demonstration policy includes:
-
-| Action | Decision | Risk |
-|---|---|---:|
-| `read_file` | `ALLOW` | 0 |
-| `search_logs` | `ALLOW` | 0 |
-| `delete_file` | `ASK` | 20 |
-| `run_program` | `ASK` | 25 |
-| `send_email` | `BLOCK` | 40 |
-| Unknown action | `BLOCK` | Defined by the engine |
-
-Sensitive `ASK` actions require an explicit `APPROVED` or `DENIED` decision.
-
-Blocked actions increase both the agentâ€™s risk score and blocked-attempt count.
+| Action          | Policy  | Risk |
+| --------------- | ------- | ---: |
+| `read_file`     | `ALLOW` |    0 |
+| `search_logs`   | `ALLOW` |    0 |
+| `delete_file`   | `ASK`   |   20 |
+| `run_program`   | `ASK`   |   25 |
+| `send_email`    | `BLOCK` |   40 |
+| `view_audit`    | `ALLOW` |    0 |
+| `audit_summary` | `ALLOW` |    0 |
+| Unknown action  | `BLOCK` |   50 |
 
 ## Risk Levels
 
-| Score | Risk level |
-|---:|---|
-| 0â€“29 | `LOW` |
-| 30â€“59 | `MEDIUM` |
-| 60â€“99 | `HIGH` |
+|         Score | Risk level |
+| ------------: | ---------- |
+|          0–19 | `LOW`      |
+|         20–59 | `MEDIUM`   |
+|         60–99 | `HIGH`     |
 | 100 or higher | `CRITICAL` |
 
-An agent is suspended when it reaches the configured risk threshold or maximum blocked-attempt count.
+An agent is suspended when it reaches:
 
-Every registered agent has its own:
+* Three blocked attempts, or
+* A risk score of 100
 
-- Status
-- Risk score
-- Risk level
-- Blocked-attempt count
-- Audit history
+Suspended agents receive `REFUSED`, even when requesting an ordinarily allowed action.
 
 ## Installation
 
-Install the V8 dependencies:
+Install the dependencies:
 
 ```powershell
 python -m pip install -r requirements.txt
 ```
 
+Check the Python files:
+
+```powershell
+python -m py_compile main.py database.py api.py
+```
+
 ## Terminal Mode
 
-Run AgentGuard directly:
+Run the local terminal interface:
 
 ```powershell
 python main.py
@@ -118,7 +175,7 @@ reset
 quit
 ```
 
-You can also enter supported actions such as:
+Supported demonstration actions include:
 
 ```text
 read_file
@@ -126,14 +183,18 @@ search_logs
 delete_file
 run_program
 send_email
+view_audit
+audit_summary
 ```
+
+The terminal interface remains available for local development and recovery. V9 credential and scope enforcement protects FastAPI agent requests.
 
 ## FastAPI Mode
 
 Set an administrator PIN for the current PowerShell session:
 
 ```powershell
-$env:AGENTGUARD_ADMIN_PIN = "2468"
+$env:AGENTGUARD_ADMIN_PIN = "choose-a-private-pin"
 ```
 
 Start the API:
@@ -148,46 +209,122 @@ Open the interactive documentation:
 http://127.0.0.1:8000/docs
 ```
 
-The API root is:
-
-```text
-http://127.0.0.1:8000
-```
-
 Stop the server with `Ctrl + C`.
 
-Do not use the example PIN in a real deployment.
+Do not commit the administrator PIN or place a real PIN in the README.
+
+## Agent Credentials
+
+Agent credentials begin with:
+
+```text
+ag_
+```
+
+The original credential is displayed only when:
+
+* An identity is created
+* A credential is rotated
+
+AgentGuard stores only:
+
+* A random salt
+* A PBKDF2-derived hash
+
+It does not store the original credential. If a credential is lost, rotate it.
+
+Never commit agent credentials to Git, place them in source code, paste them into documentation, or expose them in logs.
+
+## API Request Headers
+
+Administrative endpoints use:
+
+```text
+X-Admin-Pin
+```
+
+Agent endpoints use:
+
+```text
+X-Agent-Name
+X-Agent-Key
+```
 
 ## API Endpoints
 
-| Method | Endpoint | Purpose |
-|---|---|---|
-| `GET` | `/` | Application information |
-| `GET` | `/health` | API health and agent count |
-| `GET` | `/permissions` | Policy and risk configuration |
-| `GET` | `/agents` | List registered agents |
-| `POST` | `/agents` | Register an agent |
-| `GET` | `/agents/{agent_name}` | Get one agentâ€™s state |
-| `POST` | `/actions/evaluate` | Evaluate an agent action |
-| `GET` | `/agents/{agent_name}/audit` | Get recent audit events |
-| `GET` | `/agents/{agent_name}/summary` | Get audit statistics |
-| `POST` | `/agents/{agent_name}/reset` | Administratively reset an agent |
+| Method | Endpoint                                     | Protection | Purpose                                |
+| ------ | -------------------------------------------- | ---------- | -------------------------------------- |
+| `GET`  | `/`                                          | Public     | Application information                |
+| `GET`  | `/health`                                    | Public     | Health and registration counts         |
+| `GET`  | `/permissions`                               | Public     | Policy and available scopes            |
+| `GET`  | `/agents`                                    | Admin      | List registered agents                 |
+| `POST` | `/agents`                                    | Admin      | Register identity and issue credential |
+| `GET`  | `/agents/{agent_name}`                       | Admin      | View an agent                          |
+| `PUT`  | `/agents/{agent_name}/scopes`                | Admin      | Replace assigned scopes                |
+| `POST` | `/agents/{agent_name}/credential/rotate`     | Admin      | Rotate credential                      |
+| `POST` | `/agents/{agent_name}/credential/revoke`     | Admin      | Revoke credential                      |
+| `POST` | `/actions/evaluate`                          | Agent      | Authenticate, authorize, and evaluate  |
+| `GET`  | `/agents/{agent_name}/audit`                 | Agent      | View own audit events                  |
+| `GET`  | `/agents/{agent_name}/summary`               | Agent      | View own audit summary                 |
+| `GET`  | `/agents/{agent_name}/authentication-events` | Admin      | View identity-security evidence        |
+| `POST` | `/agents/{agent_name}/reset`                 | Admin      | Reset suspended agent                  |
 
-## Example Action Evaluation
+## Registering an Identity
 
-Request:
+Use `POST /agents` with the administrator PIN.
+
+Example body:
 
 ```json
 {
   "agent_name": "research_agent",
-  "action": "read_file"
+  "scopes": [
+    "read_file",
+    "search_logs",
+    "view_audit",
+    "audit_summary"
+  ]
 }
 ```
 
-Example response:
+The response contains a credential once:
 
 ```json
 {
+  "agent_name": "research_agent",
+  "credential": "ag_REDACTED",
+  "credential_notice": "Save this credential now. AgentGuard will not display it again."
+}
+```
+
+`ag_REDACTED` is documentation text, not a working credential.
+
+## Evaluating an Action
+
+Use `POST /actions/evaluate`.
+
+Headers:
+
+```text
+X-Agent-Name: research_agent
+X-Agent-Key: the privately stored agent credential
+```
+
+Request body:
+
+```json
+{
+  "action": "read_file",
+  "approval": null
+}
+```
+
+Example successful response:
+
+```json
+{
+  "identity_authenticated": true,
+  "scope_authorized": true,
   "agent_name": "research_agent",
   "action": "read_file",
   "policy_decision": "ALLOW",
@@ -201,188 +338,215 @@ Example response:
 }
 ```
 
-## Human Approval Example
+## Authentication and Authorization Results
 
-Approved request:
+| Situation                              | HTTP status | Meaning                           |
+| -------------------------------------- | ----------: | --------------------------------- |
+| Valid credential and valid scope       |       `200` | Request reaches the policy engine |
+| Missing or invalid credential          |       `401` | Identity was not authenticated    |
+| Revoked credential                     |       `401` | Identity authentication failed    |
+| Valid credential but missing scope     |       `403` | Identity lacks permission         |
+| Agent attempts another agent's records |       `403` | Resource boundary denied          |
+| Unknown administrative resource        |       `404` | Requested record was not found    |
+
+## Human Approval
+
+Actions with an `ASK` policy support:
+
+```text
+APPROVED
+DENIED
+PENDING
+```
+
+Example:
 
 ```json
 {
-  "agent_name": "approval_test_agent",
   "action": "delete_file",
   "approval": "APPROVED"
 }
 ```
 
-Denied request:
+An `ASK` request without an approval value returns `PENDING`.
+
+## Credential Rotation
+
+Credential rotation:
+
+* Generates a new credential
+* Invalidates the old credential immediately
+* Reactivates a previously revoked identity
+* Displays the new credential only once
+* Records the rotation timestamp
+
+Use:
+
+```text
+POST /agents/{agent_name}/credential/rotate
+```
+
+## Credential Revocation
+
+Revocation prevents the current credential from authenticating.
+
+Use:
+
+```text
+POST /agents/{agent_name}/credential/revoke
+```
+
+A revoked credential returns HTTP `401`.
+
+## Scope Management
+
+An administrator can replace an identity's scopes with:
+
+```text
+PUT /agents/{agent_name}/scopes
+```
+
+Example:
 
 ```json
 {
-  "agent_name": "denied_test_agent",
-  "action": "delete_file",
-  "approval": "DENIED"
+  "scopes": [
+    "read_file",
+    "search_logs"
+  ]
 }
 ```
 
-If no approval is supplied for an `ASK` action, AgentGuard returns `PENDING`.
+Only actions defined in the AgentGuard policy can be assigned as scopes.
 
-## Automatic Suspension
+## Audit Evidence
 
-A blocked action such as `send_email` adds risk and increases the blocked-attempt count.
+The `audit_events` table records:
 
-Example progression:
+* Agent name
+* Timestamp
+* Action
+* Policy decision
+* Approval result
+* Risk added
+* Total risk
+* Risk level
+* Agent status
+* Blocked attempts
 
-```text
-Attempt 1: Risk 40, blocked attempts 1, ACTIVE
-Attempt 2: Risk 80, blocked attempts 2, ACTIVE
-Attempt 3: Risk 120, blocked attempts 3, SUSPENDED
-```
+The `authentication_events` table records:
 
-Once suspended, the agent cannot perform normally permitted actions until an authorized administrator resets it.
+* Claimed agent identity
+* Authenticated identity
+* Requested action
+* Authentication or authorization outcome
+* Security reason
+* Timestamp
 
-## Administrator Reset
+Credential values and credential hashes are not written to authentication-event records.
 
-The reset endpoint requires the `X-Admin-Pin` request header.
+## Verified V9 Security Tests
 
-In the interactive API documentation:
+V9 was manually verified through the running FastAPI application:
 
-1. Open `POST /agents/{agent_name}/reset`.
-2. Enter the agent name.
-3. Enter the configured PIN in `x-admin-pin`.
-4. Execute the request.
-
-A successful reset returns the agent to:
-
-```text
-Status: ACTIVE
-Risk score: 0
-Blocked attempts: 0
-```
-
-The reset is recorded in the audit trail.
-
-## Audit Records
-
-AgentGuard stores security events in SQLite and writes local text events to `security.log`.
-
-Audit information includes:
-
-- Agent name
-- Timestamp
-- Requested action
-- Policy decision
-- Approval result
-- Risk score
-- Risk level
-- Agent status
-
-Runtime logs and databases are excluded from Git because real security records may contain sensitive information.
+* Correct credential returned HTTP `200`
+* Incorrect credential returned HTTP `401`
+* Missing scope returned HTTP `403`
+* Adding the scope allowed the request to reach policy enforcement
+* `send_email` remained blocked by policy after scope authorization
+* Credential rotation invalidated the old credential
+* New rotated credential authenticated successfully
+* Credential revocation rejected the newest credential
+* Authentication events recorded success and failure
+* Scope events recorded allowed and denied outcomes
+* Existing V8 audit records remained intact
+* Terminal mode continued to run
+* Python compilation succeeded
 
 ## Version History
 
-### Version 1 â€” Basic Permission Policy
+### Version 1 — Basic Policy
 
-- Added `ALLOW`, `ASK`, and `BLOCK` decisions
-- Added terminal action evaluation
+* Added `ALLOW`, `ASK`, and `BLOCK`
 
-### Version 2 â€” Block Tracking
+### Version 2 — Block Tracking
 
-- Counted blocked attempts
-- Added automatic suspension
+* Counted blocked attempts
+* Added automatic suspension
 
-### Version 3 â€” Risk Scoring
+### Version 3 — Risk Scoring
 
-- Added action risk weights
-- Added risk levels and thresholds
+* Added weighted risk and risk levels
 
-### Version 4 â€” Human Approval
+### Version 4 — Human Approval
 
-- Added approval for sensitive actions
-- Added approved and denied outcomes
+* Added approved and denied outcomes
 
-### Version 5 â€” Administrative Reset
+### Version 5 — Administrative Reset
 
-- Added PIN-protected reset
-- Added persistent state and security logging
+* Added PIN-protected reset and persistent state
 
-### Version 6 â€” SQLite Audit History
+### Version 6 — SQLite Audit History
 
-- Added database-backed security events
-- Added recent-event and summary queries
+* Added database-backed security evidence
 
-### Version 7 â€” Multi-Agent Control
+### Version 7 — Multi-Agent Control
 
-- Added independent agent states
-- Added agent registration and switching
-- Preserved state independently for every agent
+* Added independent state for multiple agents
 
-### Version 8 â€” FastAPI Control Plane
+### Version 8 — FastAPI Control Plane
 
-- Added REST API access
-- Added interactive API documentation
-- Added agent registration and state endpoints
-- Added remote policy evaluation
-- Added approval input
-- Added audit and summary endpoints
-- Added administrator reset endpoint
-- Verified allow, block, approval, denial, suspension, refusal, reset, and audit workflows
+* Added REST endpoints and interactive documentation
 
-## Current Security Limitation
+### Version 9 — Identity and Scope Boundaries
 
-V8 identifies an agent using the `agent_name` supplied in the request.
+* Added unique agent credentials
+* Added salted credential hashing
+* Added credential authentication
+* Added per-agent scopes
+* Added credential rotation and revocation
+* Added `401` and `403` security boundaries
+* Added authentication-event evidence
+* Prevented agents from accessing other agents' records
 
-The API does not yet cryptographically authenticate that the caller truly owns that agent identity. Therefore, V8 is suitable as a local learning and development control plane, not as a production authorization system.
+## Security Limitations
 
-## Planned Security Architecture
+AgentGuard V9 is a local defensive learning project.
 
-The next security layer will enforce:
+Current limitations include:
 
-```text
-Agent credential
-â†’ Identity authentication
-â†’ Scope boundary
-â†’ Permission decision
-â†’ Risk update
-â†’ Audit evidence
-```
+* SQLite is intended for local development
+* State is split between JSON and SQLite
+* The administrator uses a PIN rather than a full user account
+* Rate limiting is not yet implemented
+* Agent credentials do not currently expire automatically
+* Human approvals are not tied to authenticated human identities
+* Tool execution remains simulated
+* TLS is not configured for local development
 
-Planned improvements include:
+Do not expose the development API directly to the public internet.
 
-- Agent API keys or signed credentials
-- Hashed credential storage
-- Credential rotation and revocation
-- Agent-specific permission scopes
-- Resource and tool boundaries
-- Per-agent rate limits
-- Authenticated human approvers
-- Policy administration endpoints
-- Real-time security alerts
-- Web monitoring dashboard
-- Sandboxed tool execution
-- AgentGuard adapter for CanaryLab AI
+## Future Development
 
-## Future Principle
+Possible future improvements include:
 
-```text
-Agent identity â‰  agent permission
-```
-
-Authentication will answer:
-
-```text
-Who is making this request?
-```
-
-Authorization will separately answer:
-
-```text
-What is this authenticated agent permitted to do?
-```
-
-This separation is essential for building a secure multi-agent control plane.
+* Web security dashboard
+* Authenticated administrator and approver accounts
+* Expiring credentials
+* Rate limiting and failed-login lockout
+* Policy administration interface
+* Resource-specific scopes
+* Real-time security alerts
+* Sandboxed tool execution
+* AgentGuard integration with CanaryLab AI
+* PostgreSQL deployment support
+* Docker isolation
+* Signed agent requests
+* Multi-tenant organizational boundaries
 
 ## Safety Notice
 
-AgentGuard is a defensive educational project. It currently evaluates and records simulated agent actions. It does not provide unrestricted command execution, filesystem access, browser access, or network access.
+AgentGuard is a defensive educational project. It evaluates and records simulated agent actions. It does not provide unrestricted operating-system, filesystem, browser, or network execution.
 
 ## Author
 

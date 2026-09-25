@@ -1,3 +1,11 @@
+"""
+AgentGuard V9 FastAPI control plane.
+
+Agent requests must authenticate with an agent name and credential.
+Authenticated identities must also possess the requested action scope.
+"""
+
+import hmac
 import os
 from typing import Literal
 
@@ -13,37 +21,58 @@ import main
 from database import (
     get_audit_summary,
     get_recent_audit_events,
+    get_recent_authentication_events,
 )
 
 
 app = FastAPI(
     title="AgentGuard Control Plane API",
     description=(
-        "A multi-agent permission, risk, "
-        "suspension, and audit control plane."
+        "A multi-agent identity, scope, "
+        "permission, risk, suspension, "
+        "and audit control plane."
     ),
-    version="8.0",
+    version="9.0",
 )
 
 
 class AgentRegistration(BaseModel):
-    """Information required to register an agent."""
+    """Information required to register an identity."""
 
     agent_name: str = Field(
         min_length=1,
         max_length=100,
         examples=["research_agent"],
+    )
+
+    scopes: list[str] = Field(
+        min_length=1,
+        examples=[
+            [
+                "read_file",
+                "search_logs",
+            ]
+        ],
+    )
+
+
+class ScopeUpdate(BaseModel):
+    """Replacement scopes for an agent."""
+
+    scopes: list[str] = Field(
+        min_length=1,
+        examples=[
+            [
+                "read_file",
+                "search_logs",
+                "view_audit",
+            ]
+        ],
     )
 
 
 class ActionRequest(BaseModel):
-    """An action requested by one agent."""
-
-    agent_name: str = Field(
-        min_length=1,
-        max_length=100,
-        examples=["research_agent"],
-    )
+    """An action requested by an authenticated agent."""
 
     action: str = Field(
         min_length=1,
@@ -57,8 +86,8 @@ class ActionRequest(BaseModel):
     ] | None = Field(
         default=None,
         description=(
-            "Human decision for actions that "
-            "require approval."
+            "Human decision for an action "
+            "whose policy is ASK."
         ),
         examples=["APPROVED"],
     )
@@ -72,9 +101,7 @@ def startup_event():
 
 
 def require_admin(
-    x_admin_pin: str | None = Header(
-        default=None,
-    ),
+    x_admin_pin: str | None,
 ):
     """Verify the administrative API PIN."""
 
@@ -91,10 +118,25 @@ def require_admin(
             ),
         )
 
-    if x_admin_pin != configured_pin:
+    if not x_admin_pin:
         raise HTTPException(
             status_code=401,
-            detail="Administrator authentication failed.",
+            detail=(
+                "Administrator authentication "
+                "is required."
+            ),
+        )
+
+    if not hmac.compare_digest(
+        x_admin_pin,
+        configured_pin,
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                "Administrator authentication "
+                "failed."
+            ),
         )
 
 
@@ -102,7 +144,18 @@ def serialize_agent(
     agent_name,
     state,
 ):
-    """Convert one agent state into API data."""
+    """Convert an agent state into API data."""
+
+    identity = None
+
+    try:
+        identity = (
+            main.get_public_agent_identity(
+                agent_name
+            )
+        )
+    except KeyError:
+        identity = None
 
     return {
         "agent_name": agent_name,
@@ -116,20 +169,129 @@ def serialize_agent(
         "blocked_attempts": state[
             "blocked_attempts"
         ],
+        "identity": identity,
     }
+
+
+def authenticate_request(
+    x_agent_name,
+    x_agent_key,
+    action,
+):
+    """Authenticate an agent and enforce scope."""
+
+    try:
+        return (
+            main.authenticate_and_authorize_agent(
+                agent_name=x_agent_name,
+                credential=x_agent_key,
+                action=action,
+            )
+        )
+
+    except main.AgentAuthenticationError as error:
+        raise HTTPException(
+            status_code=401,
+            detail=str(error),
+            headers={
+                "WWW-Authenticate": (
+                    "AgentCredential"
+                )
+            },
+        ) from error
+
+    except main.AgentScopeError as error:
+        raise HTTPException(
+            status_code=403,
+            detail=str(error),
+        ) from error
+
+
+def authenticate_agent_owner(
+    requested_agent_name,
+    x_agent_name,
+    x_agent_key,
+    required_scope,
+):
+    """Authenticate an agent accessing its own data."""
+
+    try:
+        identity = main.authenticate_agent(
+            agent_name=x_agent_name,
+            credential=x_agent_key,
+            action=required_scope,
+        )
+
+    except main.AgentAuthenticationError as error:
+        raise HTTPException(
+            status_code=401,
+            detail=str(error),
+            headers={
+                "WWW-Authenticate": (
+                    "AgentCredential"
+                )
+            },
+        ) from error
+
+    normalized_requested_name = (
+        main.normalize_agent_name(
+            requested_agent_name
+        )
+    )
+
+    if (
+        identity["agent_name"]
+        != normalized_requested_name
+    ):
+        main.record_authentication_event(
+            claimed_agent_name=(
+                identity["agent_name"]
+            ),
+            authenticated_agent_name=(
+                identity["agent_name"]
+            ),
+            action=required_scope,
+            outcome="RESOURCE_DENIED",
+            reason=(
+                "Agent attempted to access "
+                "another agent's records."
+            ),
+        )
+
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Authenticated agent cannot "
+                "access another agent's records."
+            ),
+        )
+
+    try:
+        main.enforce_agent_scope(
+            identity,
+            required_scope,
+        )
+
+    except main.AgentScopeError as error:
+        raise HTTPException(
+            status_code=403,
+            detail=str(error),
+        ) from error
+
+    return identity
 
 
 @app.get("/")
 def home():
-    """Return basic AgentGuard API information."""
+    """Return basic AgentGuard information."""
 
     return {
         "application": "AgentGuard",
-        "version": "8.0",
+        "version": "9.0",
         "status": "running",
         "purpose": (
-            "Multi-agent permission and "
-            "security control plane"
+            "Multi-agent identity, permission, "
+            "and security control plane"
         ),
         "documentation": "/docs",
     }
@@ -141,19 +303,26 @@ def health():
 
     return {
         "status": "healthy",
+        "version": "9.0",
         "registered_agents": len(
             main.agent_states
+        ),
+        "registered_identities": len(
+            main.list_public_agent_identities()
         ),
     }
 
 
 @app.get("/permissions")
 def permissions():
-    """Return the current action policy."""
+    """Return the available action policy."""
 
     return {
         "permissions": main.permissions,
         "risk_weights": main.risk_weights,
+        "available_scopes": sorted(
+            main.permissions.keys()
+        ),
         "max_blocked_attempts": (
             main.max_blocked_attempts
         ),
@@ -164,8 +333,14 @@ def permissions():
 
 
 @app.get("/agents")
-def list_agents():
-    """Return every registered agent."""
+def list_agents(
+    x_admin_pin: str | None = Header(
+        default=None,
+    ),
+):
+    """Return every agent to an administrator."""
+
+    require_admin(x_admin_pin)
 
     return [
         serialize_agent(
@@ -182,14 +357,22 @@ def list_agents():
     "/agents",
     status_code=201,
 )
-def register_agent(
+def register_agent_identity(
     registration: AgentRegistration,
+    x_admin_pin: str | None = Header(
+        default=None,
+    ),
 ):
-    """Register a new agent."""
+    """Register an agent and issue its credential."""
+
+    require_admin(x_admin_pin)
 
     try:
-        result = main.register_agent(
-            registration.agent_name
+        return main.issue_agent_credential(
+            agent_name=(
+                registration.agent_name
+            ),
+            scopes=registration.scopes,
         )
 
     except ValueError as error:
@@ -198,19 +381,17 @@ def register_agent(
             detail=str(error),
         ) from error
 
-    response = serialize_agent(
-        result["agent_name"],
-        result["state"],
-    )
-
-    response["created"] = result["created"]
-
-    return response
-
 
 @app.get("/agents/{agent_name}")
-def get_agent(agent_name: str):
-    """Return one registered agent."""
+def get_agent(
+    agent_name: str,
+    x_admin_pin: str | None = Header(
+        default=None,
+    ),
+):
+    """Return one agent to an administrator."""
+
+    require_admin(x_admin_pin)
 
     normalized_name = (
         main.normalize_agent_name(agent_name)
@@ -233,16 +414,120 @@ def get_agent(agent_name: str):
     )
 
 
+@app.put("/agents/{agent_name}/scopes")
+def update_agent_scopes(
+    agent_name: str,
+    update: ScopeUpdate,
+    x_admin_pin: str | None = Header(
+        default=None,
+    ),
+):
+    """Replace an agent's permission scopes."""
+
+    require_admin(x_admin_pin)
+
+    try:
+        identity = main.set_agent_scopes(
+            agent_name=agent_name,
+            scopes=update.scopes,
+        )
+
+    except KeyError as error:
+        raise HTTPException(
+            status_code=404,
+            detail=str(error),
+        ) from error
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        ) from error
+
+    return {
+        "updated": True,
+        "identity": identity,
+    }
+
+
+@app.post(
+    "/agents/{agent_name}/credential/rotate"
+)
+def rotate_credential(
+    agent_name: str,
+    x_admin_pin: str | None = Header(
+        default=None,
+    ),
+):
+    """Rotate an agent credential."""
+
+    require_admin(x_admin_pin)
+
+    try:
+        return main.rotate_agent_credential(
+            agent_name
+        )
+
+    except KeyError as error:
+        raise HTTPException(
+            status_code=404,
+            detail=str(error),
+        ) from error
+
+
+@app.post(
+    "/agents/{agent_name}/credential/revoke"
+)
+def revoke_credential(
+    agent_name: str,
+    x_admin_pin: str | None = Header(
+        default=None,
+    ),
+):
+    """Revoke an agent credential."""
+
+    require_admin(x_admin_pin)
+
+    try:
+        return main.revoke_agent_credential(
+            agent_name
+        )
+
+    except KeyError as error:
+        raise HTTPException(
+            status_code=404,
+            detail=str(error),
+        ) from error
+
+
 @app.post("/actions/evaluate")
 def evaluate_action(
     request: ActionRequest,
+    x_agent_name: str | None = Header(
+        default=None,
+    ),
+    x_agent_key: str | None = Header(
+        default=None,
+    ),
 ):
-    """Evaluate an action for one agent."""
+    """Authenticate and evaluate an agent action."""
+
+    authentication = authenticate_request(
+        x_agent_name=x_agent_name,
+        x_agent_key=x_agent_key,
+        action=request.action,
+    )
+
+    authenticated_name = (
+        authentication["identity"][
+            "agent_name"
+        ]
+    )
 
     try:
         result = main.evaluate_action(
-            agent_name=request.agent_name,
-            action=request.action,
+            agent_name=authenticated_name,
+            action=authentication["action"],
             approval=request.approval,
         )
 
@@ -252,7 +537,11 @@ def evaluate_action(
             detail=str(error),
         ) from error
 
-    return result
+    return {
+        "identity_authenticated": True,
+        "scope_authorized": True,
+        **result,
+    }
 
 
 @app.get("/agents/{agent_name}/audit")
@@ -263,26 +552,26 @@ def recent_audit_events(
         ge=1,
         le=100,
     ),
+    x_agent_name: str | None = Header(
+        default=None,
+    ),
+    x_agent_key: str | None = Header(
+        default=None,
+    ),
 ):
-    """Return recent audit events for one agent."""
+    """Return an authenticated agent's audit events."""
 
-    normalized_name = (
-        main.normalize_agent_name(agent_name)
+    authenticate_agent_owner(
+        requested_agent_name=agent_name,
+        x_agent_name=x_agent_name,
+        x_agent_key=x_agent_key,
+        required_scope="view_audit",
     )
 
-    try:
-        main.get_agent_state(
-            normalized_name
-        )
-
-    except KeyError as error:
-        raise HTTPException(
-            status_code=404,
-            detail=str(error),
-        ) from error
-
     events = get_recent_audit_events(
-        normalized_name,
+        main.normalize_agent_name(
+            agent_name
+        ),
         limit=limit,
     )
 
@@ -302,23 +591,27 @@ def recent_audit_events(
 
 
 @app.get("/agents/{agent_name}/summary")
-def audit_summary(agent_name: str):
-    """Return audit statistics for one agent."""
+def audit_summary(
+    agent_name: str,
+    x_agent_name: str | None = Header(
+        default=None,
+    ),
+    x_agent_key: str | None = Header(
+        default=None,
+    ),
+):
+    """Return an authenticated agent's summary."""
+
+    authenticate_agent_owner(
+        requested_agent_name=agent_name,
+        x_agent_name=x_agent_name,
+        x_agent_key=x_agent_key,
+        required_scope="audit_summary",
+    )
 
     normalized_name = (
         main.normalize_agent_name(agent_name)
     )
-
-    try:
-        main.get_agent_state(
-            normalized_name
-        )
-
-    except KeyError as error:
-        raise HTTPException(
-            status_code=404,
-            detail=str(error),
-        ) from error
 
     summary = get_audit_summary(
         normalized_name
@@ -328,6 +621,34 @@ def audit_summary(agent_name: str):
         "agent_name": normalized_name,
         **summary,
     }
+
+
+@app.get(
+    "/agents/{agent_name}/authentication-events"
+)
+def authentication_events(
+    agent_name: str,
+    limit: int = Query(
+        default=20,
+        ge=1,
+        le=100,
+    ),
+    x_admin_pin: str | None = Header(
+        default=None,
+    ),
+):
+    """Return authentication events to an admin."""
+
+    require_admin(x_admin_pin)
+
+    normalized_name = (
+        main.normalize_agent_name(agent_name)
+    )
+
+    return get_recent_authentication_events(
+        normalized_name,
+        limit=limit,
+    )
 
 
 @app.post("/agents/{agent_name}/reset")

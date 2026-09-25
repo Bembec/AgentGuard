@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from pathlib import Path
 
@@ -8,14 +9,15 @@ database_path = (
 
 
 def initialize_database():
-    """Create or upgrade the AgentGuard audit database."""
+    """Create or upgrade the AgentGuard database."""
 
     with sqlite3.connect(database_path) as connection:
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS audit_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                agent_name TEXT NOT NULL DEFAULT 'legacy_agent',
+                agent_name TEXT NOT NULL
+                    DEFAULT 'legacy_agent',
                 timestamp TEXT NOT NULL,
                 action TEXT NOT NULL,
                 decision TEXT NOT NULL,
@@ -29,15 +31,16 @@ def initialize_database():
             """
         )
 
-        columns = connection.execute(
+        audit_columns = connection.execute(
             "PRAGMA table_info(audit_events)"
         ).fetchall()
 
-        column_names = [
-            column[1] for column in columns
+        audit_column_names = [
+            column[1]
+            for column in audit_columns
         ]
 
-        if "agent_name" not in column_names:
+        if "agent_name" not in audit_column_names:
             connection.execute(
                 """
                 ALTER TABLE audit_events
@@ -45,6 +48,60 @@ def initialize_database():
                 NOT NULL DEFAULT 'legacy_agent'
                 """
             )
+
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS
+            agent_identities (
+                agent_name TEXT PRIMARY KEY,
+                credential_salt TEXT NOT NULL,
+                credential_hash TEXT NOT NULL,
+                scopes_json TEXT NOT NULL,
+                credential_status TEXT NOT NULL
+                    DEFAULT 'ACTIVE',
+                created_at TEXT NOT NULL,
+                rotated_at TEXT,
+                revoked_at TEXT
+            )
+            """
+        )
+
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS
+            authentication_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                claimed_agent_name TEXT,
+                authenticated_agent_name TEXT,
+                action TEXT,
+                outcome TEXT NOT NULL,
+                reason TEXT NOT NULL
+            )
+            """
+        )
+
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+            idx_audit_events_agent
+            ON audit_events (
+                agent_name,
+                id
+            )
+            """
+        )
+
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+            idx_authentication_events_agent
+            ON authentication_events (
+                claimed_agent_name,
+                id
+            )
+            """
+        )
 
 
 def save_audit_event(
@@ -92,8 +149,12 @@ def save_audit_event(
             ),
         )
 
-def get_recent_audit_events(agent_name, limit=5):
-    """Return the most recent events for one agent."""
+
+def get_recent_audit_events(
+    agent_name,
+    limit=5,
+):
+    """Return recent events for one agent."""
 
     with sqlite3.connect(database_path) as connection:
         cursor = connection.execute(
@@ -112,7 +173,10 @@ def get_recent_audit_events(agent_name, limit=5):
             ORDER BY id DESC
             LIMIT ?
             """,
-            (agent_name, limit),
+            (
+                agent_name,
+                limit,
+            ),
         )
 
         return cursor.fetchall()
@@ -127,22 +191,37 @@ def get_audit_summary(agent_name):
             SELECT
                 COUNT(*),
                 SUM(
-                    CASE WHEN decision = 'ALLOW'
-                    THEN 1 ELSE 0 END
+                    CASE
+                        WHEN decision = 'ALLOW'
+                        THEN 1
+                        ELSE 0
+                    END
                 ),
                 SUM(
-                    CASE WHEN decision = 'ASK'
-                    THEN 1 ELSE 0 END
+                    CASE
+                        WHEN decision = 'ASK'
+                        THEN 1
+                        ELSE 0
+                    END
                 ),
                 SUM(
-                    CASE WHEN decision = 'BLOCK'
-                    THEN 1 ELSE 0 END
+                    CASE
+                        WHEN decision = 'BLOCK'
+                        THEN 1
+                        ELSE 0
+                    END
                 ),
                 SUM(
-                    CASE WHEN decision = 'REFUSED'
-                    THEN 1 ELSE 0 END
+                    CASE
+                        WHEN decision = 'REFUSED'
+                        THEN 1
+                        ELSE 0
+                    END
                 ),
-                COALESCE(MAX(risk_score), 0)
+                COALESCE(
+                    MAX(risk_score),
+                    0
+                )
             FROM audit_events
             WHERE agent_name = ?
             """,
@@ -158,9 +237,292 @@ def get_audit_summary(agent_name):
         "highest_risk_score": summary[5],
     }
 
+
+def create_agent_identity(
+    agent_name,
+    credential_salt,
+    credential_hash,
+    scopes,
+    timestamp,
+):
+    """Store a new agent identity."""
+
+    scopes_json = json.dumps(
+        sorted(set(scopes))
+    )
+
+    try:
+        with sqlite3.connect(
+            database_path
+        ) as connection:
+            connection.execute(
+                """
+                INSERT INTO agent_identities (
+                    agent_name,
+                    credential_salt,
+                    credential_hash,
+                    scopes_json,
+                    credential_status,
+                    created_at,
+                    rotated_at,
+                    revoked_at
+                )
+                VALUES (?, ?, ?, ?, 'ACTIVE', ?, NULL, NULL)
+                """,
+                (
+                    agent_name,
+                    credential_salt,
+                    credential_hash,
+                    scopes_json,
+                    timestamp,
+                ),
+            )
+
+    except sqlite3.IntegrityError:
+        return False
+
+    return True
+
+
+def get_agent_identity(agent_name):
+    """Return one stored agent identity."""
+
+    with sqlite3.connect(database_path) as connection:
+        connection.row_factory = sqlite3.Row
+
+        row = connection.execute(
+            """
+            SELECT
+                agent_name,
+                credential_salt,
+                credential_hash,
+                scopes_json,
+                credential_status,
+                created_at,
+                rotated_at,
+                revoked_at
+            FROM agent_identities
+            WHERE agent_name = ?
+            """,
+            (agent_name,),
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    identity = dict(row)
+
+    try:
+        identity["scopes"] = json.loads(
+            identity.pop("scopes_json")
+        )
+    except (
+        json.JSONDecodeError,
+        TypeError,
+    ):
+        identity["scopes"] = []
+
+    return identity
+
+
+def get_agent_identities():
+    """Return all identities without credential data."""
+
+    with sqlite3.connect(database_path) as connection:
+        connection.row_factory = sqlite3.Row
+
+        rows = connection.execute(
+            """
+            SELECT
+                agent_name,
+                scopes_json,
+                credential_status,
+                created_at,
+                rotated_at,
+                revoked_at
+            FROM agent_identities
+            ORDER BY agent_name
+            """
+        ).fetchall()
+
+    identities = []
+
+    for row in rows:
+        identity = dict(row)
+
+        try:
+            identity["scopes"] = json.loads(
+                identity.pop("scopes_json")
+            )
+        except (
+            json.JSONDecodeError,
+            TypeError,
+        ):
+            identity["scopes"] = []
+
+        identities.append(identity)
+
+    return identities
+
+
+def update_agent_scopes(
+    agent_name,
+    scopes,
+):
+    """Replace the scopes assigned to an agent."""
+
+    scopes_json = json.dumps(
+        sorted(set(scopes))
+    )
+
+    with sqlite3.connect(database_path) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE agent_identities
+            SET scopes_json = ?
+            WHERE agent_name = ?
+            """,
+            (
+                scopes_json,
+                agent_name,
+            ),
+        )
+
+        return cursor.rowcount > 0
+
+
+def rotate_agent_credential(
+    agent_name,
+    credential_salt,
+    credential_hash,
+    timestamp,
+):
+    """Replace and reactivate an agent credential."""
+
+    with sqlite3.connect(database_path) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE agent_identities
+            SET
+                credential_salt = ?,
+                credential_hash = ?,
+                credential_status = 'ACTIVE',
+                rotated_at = ?,
+                revoked_at = NULL
+            WHERE agent_name = ?
+            """,
+            (
+                credential_salt,
+                credential_hash,
+                timestamp,
+                agent_name,
+            ),
+        )
+
+        return cursor.rowcount > 0
+
+
+def revoke_agent_credential(
+    agent_name,
+    timestamp,
+):
+    """Revoke an agent credential."""
+
+    with sqlite3.connect(database_path) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE agent_identities
+            SET
+                credential_status = 'REVOKED',
+                revoked_at = ?
+            WHERE agent_name = ?
+            """,
+            (
+                timestamp,
+                agent_name,
+            ),
+        )
+
+        return cursor.rowcount > 0
+
+
+def save_authentication_event(
+    timestamp,
+    claimed_agent_name,
+    authenticated_agent_name,
+    action,
+    outcome,
+    reason,
+):
+    """Save an identity-authentication event."""
+
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO authentication_events (
+                timestamp,
+                claimed_agent_name,
+                authenticated_agent_name,
+                action,
+                outcome,
+                reason
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                timestamp,
+                claimed_agent_name,
+                authenticated_agent_name,
+                action,
+                outcome,
+                reason,
+            ),
+        )
+
+
+def get_recent_authentication_events(
+    agent_name,
+    limit=10,
+):
+    """Return recent authentication events."""
+
+    with sqlite3.connect(database_path) as connection:
+        connection.row_factory = sqlite3.Row
+
+        rows = connection.execute(
+            """
+            SELECT
+                id,
+                timestamp,
+                claimed_agent_name,
+                authenticated_agent_name,
+                action,
+                outcome,
+                reason
+            FROM authentication_events
+            WHERE
+                claimed_agent_name = ?
+                OR authenticated_agent_name = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (
+                agent_name,
+                agent_name,
+                limit,
+            ),
+        ).fetchall()
+
+    return [
+        dict(row)
+        for row in rows
+    ]
+
+
 if __name__ == "__main__":
     initialize_database()
+
     print(
-        "AgentGuard audit database initialized:"
+        "AgentGuard V9 database initialized:"
     )
     print(database_path)
